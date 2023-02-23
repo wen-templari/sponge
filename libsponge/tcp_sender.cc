@@ -13,9 +13,6 @@
 // For Lab 3, please replace with a real implementation that passes the
 // automated checks run by `make check_lab3`.
 
-template <typename... Targs>
-void DUMMY_CODE(Targs &&... /* unused */) {}
-
 using namespace std;
 
 //! \param[in] capacity the capacity of the outgoing byte stream
@@ -37,54 +34,72 @@ void TCPSender::fill_window() {
         _outstanding_segments.push_back(segment_to_send);
         _segments_out.push(segment_to_send);
         _next_seqno += segment_to_send.length_in_sequence_space();
-        // The sequence number occupied by the SYN flag is the ISN
-        // if(segment_to_send.header().syn){
-        //     _next_seqno--;
-        // }
-        cout << segment_to_send.header().to_string() << "\n";
+
+        cout << "header: " << segment_to_send.header().to_string();
         cout << "ISN " << _isn << "\n";
         cout << "bytes_in_flight: " << _bytes_in_flight << "\n";
         cout << "next seqno " << _next_seqno << "\n\n";
     };
 
-    if ((_reachSyn && stream_in().buffer_empty() && !stream_in().eof()) || _reachFin) {
-        return;
+    while (_window_size != 0) {
+        cout << "filling  window: " << _window_size << "\n";
+        if ((_reachSyn && stream_in().buffer_empty() && !stream_in().eof()) || _reachFin) {
+            return;
+        }
+        TCPSegment seg;
+        // if in waiting for stream to begin (no SYN sent)
+        if (!_reachSyn) {
+            seg.header().syn = true;
+            _reachSyn = true;
+        }
+        seg.payload() =
+            stream_in().read(_window_size > TCPConfig::MAX_PAYLOAD_SIZE ? TCPConfig::MAX_PAYLOAD_SIZE : _window_size);
+        cout << "payload read " << seg.payload().size() << "\n";
+        // if reach eof and have window space for fin
+        cout << "reach EOF: " << stream_in().eof()
+             << " | left_window_size: " << _window_size - seg.length_in_sequence_space() << "\n";
+        if (stream_in().eof() && seg.length_in_sequence_space() < _window_size) {
+            cout << "set fin \n";
+            seg.header().fin = true;
+            _reachFin = true;
+        }
+
+        if (seg.header().syn || seg.header().fin || seg.payload().size() != 0) {
+            send(seg);
+        }
     }
-    TCPSegment seg;
-    // if in waiting for stream to begin (no SYN sent)
-    if (!_reachSyn) {
-        seg.header().syn = true;
-        _reachSyn = true;
-    }
-    seg.payload() = stream_in().read(_window_size);
-    cout << "payload read " << seg.payload().size() << "\n";
-    cout << "stream size " << stream_in().buffer_size() << "\n";
-    // if reach eof and have window space for fin
-    cout << "reach EOF: " << stream_in().eof()
-         << " | left_window_size: " << _window_size - seg.length_in_sequence_space() << "\n";
-    if (stream_in().eof() && seg.length_in_sequence_space() < _window_size) {
-        cout << "set fin \n";
-        seg.header().fin = true;
-        _reachFin = true;
-    }
-    send(seg);
 }
 
 //! \param ackno The remote receiver's ackno (acknowledgment number)
 //! \param window_size The remote receiver's advertised window size
 void TCPSender::ack_received(const WrappingInt32 ackno, const uint16_t window_size) {
-    auto unwrapped_ackno = unwrap(ackno, _isn, 0);
-    cout << "ack received: " << unwrapped_ackno << " | window_size: " << window_size << "\n";
+    auto unwrapped_ackno = unwrap(ackno, _isn, _next_seqno);
+
+    cout << "\nack received: " << unwrapped_ackno << " | window_size: " << window_size << "\n";
+
+    auto abs_seg_tailno = [this](TCPSegment seg) {
+        auto abs_seqno = unwrap(seg.header().seqno, _isn, _next_seqno);
+        return abs_seqno + seg.length_in_sequence_space();
+    };
+
+    // ignore impossible ackno
+    if (unwrapped_ackno > _next_seqno ){
+    // if (unwrapped_ackno > _next_seqno || unwrapped_ackno < abs_seg_tailno(_outstanding_segments.front())) {
+        return;
+    }
+
+    _initial_window_zero = window_size == 0;
+    _window_size = _initial_window_zero ? 1 : window_size;
+
     // If the receiver has announced a window size of zero,
     // the fill window method should act like the window size is one.
     _rto = _initial_retransmission_timeout;
     _consecutive_retransmissions = 0;
-    _window_size = window_size != 0 ? window_size : 1;
 
     for (auto iter = _outstanding_segments.begin(); iter < _outstanding_segments.end(); ++iter) {
-        auto abs_seqno = unwrap(iter->header().seqno, _isn, 0);
+        auto abs_seqno = unwrap(iter->header().seqno, _isn, _next_seqno);
         cout << "abs_seqno: " << abs_seqno << " | sequence_space_size: " << iter->length_in_sequence_space() << "\n";
-        if ((abs_seqno + iter->length_in_sequence_space()) < unwrapped_ackno + 1) {
+        if (abs_seg_tailno(*iter) < unwrapped_ackno + 1) {
             // has outstanding data
             _bytes_in_flight -= iter->length_in_sequence_space();
             _outstanding_segments.erase(iter);
@@ -104,19 +119,25 @@ void TCPSender::tick(const size_t ms_since_last_tick) {
     if (_last_tick < _rto) {
         return;
     }
-    cout << "timer expired" << _last_tick << "\n";
     // timer expired
+    cout << "timer expired " << _last_tick << " >= " << _rto << "\n";
+    cout << "window_size" << _window_size << "\n";
+
     // a) retransmit earliest segment
     _segments_out.push(_outstanding_segments.front());
+    cout << "resend: " << _segments_out.back().header().to_string() << "\n\n";
+
+    // TODO what is the condition for window size is none zero
     // b) if window size is nonzero
     //    i.  incr consecutive retransmissions
     //    ii. double rto
-    if (_window_size != 0) {
+    if (_window_size != 0 && !_initial_window_zero) {
         _consecutive_retransmissions++;
         _rto *= 2;
     }
+
     // c) reset timer
-    _last_tick = 0;
+    _last_tick = -1;
 }
 
 unsigned int TCPSender::consecutive_retransmissions() const { return _consecutive_retransmissions; }
