@@ -39,9 +39,10 @@ class TCPSender {
     //! the (absolute) sequence number for the next byte to be sent
     uint64_t _next_seqno{0};
 
-    bool _initial_window_zero = true;
+    bool _initial_window_zero = false;
 
     uint64_t _window_size{1};
+    uint64_t _left_window_size{1};
 
     uint64_t _consecutive_retransmissions{0};
 
