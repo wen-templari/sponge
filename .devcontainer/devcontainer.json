@@ -1,3 +1,11 @@
 {
-    "image": "ghcr.mirror.nbtca.space/wen-templari/sponge:latest"
+    "image": "ghcr.mirror.nbtca.space/wen-templari/sponge:latest",
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "llvm-vs-code-extensions.vscode-clangd",
+                "RReverser.llvm"
+            ]
+        }
+    }
 }
