@@ -3,6 +3,8 @@ name: ci
 on:
   push:
     branches: ["dev"]
+    paths:
+      - 'Dockerfile'
 
 env:
   REGISTRY: ghcr.io
