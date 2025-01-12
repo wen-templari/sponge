@@ -1,11 +1,10 @@
-version: "3.7"
 services:
   app:
+    image: ghcr.mirror.nbtca.space/wen-templari/sponge:latest
     entrypoint:
     - sleep
     - infinity
     init: true
-    build: .
     volumes:
     - type: bind
       source: /var/run/docker.sock

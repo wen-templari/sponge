@@ -1,5 +1,3 @@
 {
-    "build": {
-        "dockerfile": "../Dockerfile"
-    }
+    "image": "ghcr.mirror.nbtca.space/wen-templari/sponge:latest"
 }
